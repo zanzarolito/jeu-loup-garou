@@ -2,18 +2,18 @@ version: "3.8"
 
 
 services:
-pocketbase:
-build: ./backend-pocketbase
-ports:
-- "8090:8090"
-volumes:
-- ./backend-pocketbase/pb_data:/pb_data
-- ./backend-pocketbase/pb_migrations:/pb_migrations
-restart: unless-stopped
+  pocketbase:
+    build: ./backend-pocketbase
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./backend-pocketbase/pb_data:/pb_data
+      - ./backend-pocketbase/pb_migrations:/pb_migrations
+    restart: unless-stopped
 
 
-frontend:
-build: ./frontend
-ports:
-- "80:80"
-restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
