@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.vite/
+backend-pocketbase/pb_data/
+backend-pocketbase/pocketbase
+*.log
