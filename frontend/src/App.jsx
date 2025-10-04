@@ -72,6 +72,51 @@ export default function App() {
     }
   }
 
+  const generateSeedNames = (count, masterName) => {
+    const seeds = []
+    const baseName = 'Joueur Test'
+    for (let i = 1; i <= count; i += 1) {
+      const candidate = `${baseName} ${i}`
+      if (candidate.toLowerCase() === masterName.toLowerCase()) {
+        seeds.push(`${candidate} bis`)
+      } else {
+        seeds.push(candidate)
+      }
+    }
+    return seeds
+  }
+
+  const handleCreateSeededGame = async (count) => {
+    if (isCreating) return
+    setError('')
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      setError('Veuillez entrer un nom avant de créer une partie test.')
+      return
+    }
+
+    try {
+      setIsCreating(true)
+      const code = generateRoomCode()
+      const room = await createRoom(code)
+      const master = await joinRoom(room.id, trimmedName, true)
+
+      const seedNames = generateSeedNames(count, trimmedName)
+      for (const seedName of seedNames) {
+        // PocketBase annule les requêtes parallèles. On les séquence donc.
+        await joinRoom(room.id, seedName, false)
+      }
+
+      setPlayer({ ...master, room: room.id, code: room.code })
+      setStep('waiting')
+    } catch (err) {
+      console.error('Erreur lors de la création de la partie de test :', err)
+      setError('Impossible de créer la partie de test. Réessayez.')
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
   const handleJoinGame = async () => {
     if (isJoining) return
     setError('')
@@ -247,6 +292,20 @@ export default function App() {
           <button onClick={handleCreateGame} disabled={isCreating}>
             {isCreating ? 'Création…' : 'Créer une partie'}
           </button>
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <p>Tests rapides :</p>
+          {[8, 11, 13, 16].map((count) => (
+            <button
+              key={count}
+              style={{ marginRight: 8, marginBottom: 8 }}
+              onClick={() => handleCreateSeededGame(count)}
+              disabled={isCreating}
+            >
+              {isCreating ? 'Création…' : `Créer avec ${count} joueurs`}
+            </button>
+          ))}
         </div>
 
         <div style={{ marginTop: 20 }}>
