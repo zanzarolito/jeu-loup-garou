@@ -1,36 +1,65 @@
-// 📁 src/hooks/usePlayers.js
 import { useEffect, useState } from 'react'
 import { listPlayers, subscribeToPlayers } from '../shared/api/players'
 
-/**
- * Hook React pour écouter en temps réel les joueurs d'une room
- * @param {string} roomId
- */
+const sortByCreated = (items) =>
+  [...items].sort((a, b) => new Date(a.created) - new Date(b.created))
+
 export function usePlayers(roomId) {
   const [players, setPlayers] = useState([])
 
   useEffect(() => {
+    if (!roomId) {
+      setPlayers([])
+      return () => {}
+    }
+
     let mounted = true
-    let unsubscribe = () => {}
-  
+    let unsubscribe = async () => {}
+
     const loadPlayers = async () => {
-      const list = await listPlayers(roomId)
-      if (mounted) setPlayers(list)
+      try {
+        const list = await listPlayers(roomId)
+        // PocketBase annule certaines requêtes concurrentes : on ignore ces cas silencieusement.
+        if (!mounted || !Array.isArray(list)) return
+        setPlayers(sortByCreated(list))
+      } catch (error) {
+        if (error?.isAbort || error?.status === 0) return
+        console.error('Impossible de charger les joueurs :', error)
+      }
     }
-  
-    const setupSubscription = async () => {
-      unsubscribe = await subscribeToPlayers(roomId, () => loadPlayers())
+
+    const handleRealtime = async ({ record }) => {
+      if (!mounted) return
+
+      if (record) {
+        const recordRoomId = Array.isArray(record.room)
+          ? record.room[0]
+          : typeof record.room === 'object'
+            ? record.room?.id
+            : record.room
+
+        if (recordRoomId && recordRoomId !== roomId) {
+          return
+        }
+      }
+
+      await loadPlayers()
     }
-  
-    loadPlayers()
-    setupSubscription()
-  
+
+    const init = async () => {
+      await loadPlayers()
+      unsubscribe = await subscribeToPlayers(roomId, handleRealtime)
+    }
+
+    init().catch((error) => {
+      console.error('Initialisation players échouée :', error)
+    })
+
     return () => {
       mounted = false
-      unsubscribe?.()
+      Promise.resolve(unsubscribe()).catch(() => {})
     }
   }, [roomId])
-  
 
   return players
 }
