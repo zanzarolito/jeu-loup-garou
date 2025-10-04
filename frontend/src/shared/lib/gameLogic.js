@@ -14,16 +14,18 @@ export function generateRoomCode(length = 6) {
     return result
   }
   
-  export const ROLES = ['loup', 'voyante', 'villageois']
+export const ROLES = ['loup', 'voyante', 'villageois']
   
   /**
    * Assigne les rôles de manière aléatoire aux joueurs
    */
-  export function assignRoles(players, roles = ROLES) {
-    const shuffled = [...players].sort(() => 0.5 - Math.random())
-    return shuffled.map((p, i) => ({
-      ...p,
-      role: roles[i % roles.length]
-    }))
-  }
+export function assignRoles(players, roles = ROLES) {
+  const eligiblePlayers = players.filter((player) => !player.isMaster)
+  const shuffled = [...eligiblePlayers].sort(() => 0.5 - Math.random())
+
+  return shuffled.map((player, index) => ({
+    ...player,
+    role: roles[index % roles.length]
+  }))
+}
   

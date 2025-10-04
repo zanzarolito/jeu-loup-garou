@@ -93,3 +93,45 @@ export async function subscribeToPlayers(roomId, callback) {
     }
   }
 }
+
+
+export async function getPlayer(playerId) {
+  return await pb.collection('players').getOne(playerId, {
+    expand: 'room'
+  })
+}
+
+
+export async function subscribeToPlayer(playerId, callback) {
+  const client = createClient()
+
+  const unsubscribe = await client.collection('players').subscribe(
+    playerId,
+    (payload) => {
+      if (!callback) return
+      callback(payload)
+    }
+  )
+
+  return async () => {
+    try {
+      await unsubscribe()
+    } finally {
+      client.realtime.unsubscribeAll()
+    }
+  }
+}
+
+
+export async function findPlayerByName(roomId, name) {
+  try {
+    const escapedName = name.replace(/"/g, '\\"')
+    return await pb.collection('players').getFirstListItem(
+      `room = "${roomId}" && name = "${escapedName}"`
+    )
+  } catch (error) {
+    if (error?.status === 404) return null
+    if (error?.isAbort || error?.status === 0) return null
+    throw error
+  }
+}

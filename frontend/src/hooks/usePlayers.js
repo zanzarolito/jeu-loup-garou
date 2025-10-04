@@ -15,8 +15,12 @@ export function usePlayers(roomId) {
 
     let mounted = true
     let unsubscribe = async () => {}
+    let pollingTimer = null
+    let isLoading = false
 
     const loadPlayers = async () => {
+      if (isLoading) return
+      isLoading = true
       try {
         const list = await listPlayers(roomId)
         // PocketBase annule certaines requêtes concurrentes : on ignore ces cas silencieusement.
@@ -25,6 +29,8 @@ export function usePlayers(roomId) {
       } catch (error) {
         if (error?.isAbort || error?.status === 0) return
         console.error('Impossible de charger les joueurs :', error)
+      } finally {
+        isLoading = false
       }
     }
 
@@ -48,15 +54,25 @@ export function usePlayers(roomId) {
 
     const init = async () => {
       await loadPlayers()
-      unsubscribe = await subscribeToPlayers(roomId, handleRealtime)
+
+      pollingTimer = setInterval(loadPlayers, 2000)
+
+      try {
+        unsubscribe = await subscribeToPlayers(roomId, handleRealtime)
+      } catch (error) {
+        if (error?.status === 0 || error?.isAbort) {
+          console.warn('Abonnement joueurs indisponible, utilisation du polling.')
+        } else {
+          console.error('Initialisation players échouée :', error)
+        }
+      }
     }
 
-    init().catch((error) => {
-      console.error('Initialisation players échouée :', error)
-    })
+    init()
 
     return () => {
       mounted = false
+      if (pollingTimer) clearInterval(pollingTimer)
       Promise.resolve(unsubscribe()).catch(() => {})
     }
   }, [roomId])
