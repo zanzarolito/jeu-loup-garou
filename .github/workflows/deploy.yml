@@ -1,23 +1,99 @@
-name: Deploy to VPS
-
+name: Deploy
 
 on:
-push:
-branches: [main]
+  push:
+    branches:
+      - main
 
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+  ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
 
 jobs:
-deploy:
-runs-on: ubuntu-latest
-steps:
-- name: SSH deploy
-uses: appleboy/ssh-action@master
-with:
-host: ${{ secrets.VPS_HOST }}
-username: ${{ secrets.VPS_USER }}
-key: ${{ secrets.VPS_PRIVATE_KEY }}
-script: |
-cd ~/apps/jeu-loup-garou
-git pull
-docker compose down
-docker compose up -d --build
+  frontend:
+    name: Build & Upload Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Sync assets to S3
+        run: |
+          aws s3 sync dist s3://${{ secrets.AWS_S3_BUCKET }} --delete --cache-control "public, max-age=31536000" --exclude index.html
+          aws s3 cp dist/index.html s3://${{ secrets.AWS_S3_BUCKET }}/index.html --cache-control "no-cache" --content-type text/html
+
+  backend:
+    name: Build & Deploy PocketBase
+    needs: frontend
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          docker build \
+            -f backend-pocketbase/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            backend-pocketbase
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Deploy on EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            export AWS_REGION=${{ secrets.AWS_REGION }}
+            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin $ECR_REGISTRY
+            cd ${{ secrets.EC2_APP_DIR }}
+            docker compose pull pocketbase
+            docker compose up -d pocketbase
+            docker image prune -f
