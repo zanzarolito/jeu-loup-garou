@@ -1,5 +1,6 @@
 // 📁 src/App.jsx
 import { useEffect, useRef, useState } from 'react'
+import './App.css'
 import WaitingRoomMJ from './views/WaitingRoomMJ'
 import WaitingRoomPlayer from './views/WaitingRoomPlayer'
 import GameMasterView from './views/GameMasterView'
@@ -35,42 +36,27 @@ const mergePlayerState = (incoming, previous) => {
   }
 }
 
+const AppShell = ({ children }) => (
+  <div className="app-surface">
+    {children}
+  </div>
+)
+
 export default function App() {
   const [player, setPlayer] = useState(null)
-  const [step, setStep] = useState('entry')
+  const [step, setStep] = useState('code')
   const [roomCode, setRoomCode] = useState('')
+  const [pendingRoom, setPendingRoom] = useState(null)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
+  const [isSearchingRoom, setIsSearchingRoom] = useState(false)
   const playerRef = useRef(null)
 
   useEffect(() => {
     playerRef.current = player
   }, [player])
-
-  const handleCreateGame = async () => {
-    if (isCreating) return
-    setError('')
-    if (!name.trim()) {
-      setError('Veuillez entrer un nom.')
-      return
-    }
-
-    try {
-      setIsCreating(true)
-      const code = generateRoomCode()
-      const room = await createRoom(code)
-      const newPlayer = await joinRoom(room.id, name, true)
-      setPlayer({ ...newPlayer, room: room.id, code: room.code })
-      setStep('waiting')
-    } catch (err) {
-      console.error('Erreur lors de la création de la partie :', err)
-      setError("Erreur lors de la création de la partie.")
-    } finally {
-      setIsCreating(false)
-    }
-  }
 
   const generateSeedNames = (count, masterName) => {
     const seeds = []
@@ -86,12 +72,14 @@ export default function App() {
     return seeds
   }
 
-  const handleCreateSeededGame = async (count) => {
+  const handleCreateGame = async (withSeeds = 0) => {
     if (isCreating) return
     setError('')
-    const trimmedName = name.trim()
-    if (!trimmedName) {
-      setError('Veuillez entrer un nom avant de créer une partie test.')
+
+    const masterName = name.trim()
+    if (!masterName) {
+      setError('Veuillez entrer un nom.')
+      setStep('name')
       return
     }
 
@@ -99,64 +87,105 @@ export default function App() {
       setIsCreating(true)
       const code = generateRoomCode()
       const room = await createRoom(code)
-      const master = await joinRoom(room.id, trimmedName, true)
+      const master = await joinRoom(room.id, masterName, true)
 
-      const seedNames = generateSeedNames(count, trimmedName)
-      for (const seedName of seedNames) {
-        // PocketBase annule les requêtes parallèles. On les séquence donc.
-        await joinRoom(room.id, seedName, false)
+      if (withSeeds > 0) {
+        const seedNames = generateSeedNames(withSeeds, masterName)
+        for (const seedName of seedNames) {
+          await joinRoom(room.id, seedName, false)
+        }
       }
 
       setPlayer({ ...master, room: room.id, code: room.code })
       setStep('waiting')
     } catch (err) {
-      console.error('Erreur lors de la création de la partie de test :', err)
-      setError('Impossible de créer la partie de test. Réessayez.')
+      console.error('Erreur lors de la création de la partie :', err)
+      setError('Erreur lors de la création de la partie.')
     } finally {
       setIsCreating(false)
     }
   }
 
-  const handleJoinGame = async () => {
+  const handleSearchRoom = async () => {
+    if (isSearchingRoom) return
+    setError('')
+    const trimmedCode = roomCode.trim().toUpperCase()
+    if (!trimmedCode) {
+      setError('Veuillez entrer un code de salle.')
+      return
+    }
+
+    try {
+      setIsSearchingRoom(true)
+      const room = await tryToGetRoom(trimmedCode)
+      if (!room) {
+        setError("Cette salle n'existe pas.")
+        return
+      }
+      if (room.started) {
+        setError('La partie est déjà en cours.')
+        return
+      }
+      setPendingRoom(room)
+      setError('')
+      setStep('name')
+    } catch (err) {
+      console.error('Erreur lors de la recherche de salle :', err)
+      setError('Impossible de vérifier cette salle. Réessayez.')
+    } finally {
+      setIsSearchingRoom(false)
+    }
+  }
+
+  const handleJoinSubmit = (event) => {
+    event.preventDefault()
+    handleSearchRoom()
+  }
+
+  const handleConfirmName = async (isMaster) => {
     if (isJoining) return
     setError('')
+
     const trimmedName = name.trim()
-    const trimmedCode = roomCode.trim()
-    if (!trimmedName || !trimmedCode) {
-      setError('Veuillez remplir tous les champs.')
+    if (!trimmedName) {
+      setError('Veuillez entrer un nom.')
       return
     }
 
     try {
       setIsJoining(true)
-      const room = await tryToGetRoom(trimmedCode)
-      if (!room) {
-        setError("Cette salle n'existe pas.")
-        setIsJoining(false)
-        return
-      }
-      if (room.started) {
-        setError('La partie est déjà en cours.')
-        setIsJoining(false)
+
+      if (isMaster) {
+        await handleCreateGame()
         return
       }
 
-      const duplicate = await findPlayerByName(room.id, trimmedName)
+      if (!pendingRoom) {
+        setError('Aucune salle sélectionnée.')
+        return
+      }
+
+      const duplicate = await findPlayerByName(pendingRoom.id, trimmedName)
       if (duplicate) {
         setError('Ce nom est déjà pris dans cette partie.')
-        setIsJoining(false)
         return
       }
 
-      const newPlayer = await joinRoom(room.id, trimmedName, false)
-      setPlayer({ ...newPlayer, room: room.id, code: room.code })
+      const newPlayer = await joinRoom(pendingRoom.id, trimmedName, false)
+      setPlayer({ ...newPlayer, room: pendingRoom.id, code: pendingRoom.code })
+      setPendingRoom(null)
       setStep('waiting')
     } catch (err) {
-      console.error('Erreur de connexion:', err)
-      setError('Impossible de rejoindre la partie. Vérifiez le code ou réessayez.')
+      console.error('Erreur lors de l’inscription :', err)
+      setError('Impossible de rejoindre la partie. Réessayez.')
     } finally {
       setIsJoining(false)
     }
+  }
+
+  const handleNameSubmit = (event) => {
+    event.preventDefault()
+    handleConfirmName(!pendingRoom)
   }
 
   useEffect(() => {
@@ -275,70 +304,180 @@ export default function App() {
     }
   }, [player?.room, player?.isMaster])
 
-  if (step === 'entry') {
-    return (
-      <div style={{ padding: 20 }}>
-        <h1>Jeu du Loup-Garou 🐺</h1>
-
-        <input
-          type="text"
-          placeholder="Nom du joueur"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-
-        <div style={{ marginTop: 10 }}>
-          <button onClick={handleCreateGame} disabled={isCreating}>
-            {isCreating ? 'Création…' : 'Créer une partie'}
-          </button>
-        </div>
-
-        <div style={{ marginTop: 20 }}>
-          <p>Tests rapides :</p>
-          {[8, 11, 13, 16].map((count) => (
-            <button
-              key={count}
-              style={{ marginRight: 8, marginBottom: 8 }}
-              onClick={() => handleCreateSeededGame(count)}
-              disabled={isCreating}
-            >
-              {isCreating ? 'Création…' : `Créer avec ${count} joueurs`}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ marginTop: 20 }}>
-          <input
-            type="text"
-            placeholder="Code de la salle"
-            value={roomCode}
-            onChange={(e) => setRoomCode(e.target.value)}
-          />
-          <button onClick={handleJoinGame} disabled={isJoining}>
-            {isJoining ? 'Connexion…' : 'Rejoindre la partie'}
-          </button>
-        </div>
-
-        {error && <p style={{ color: 'red' }}>{error}</p>}
+  const renderLandingStep = () => (
+    <AppShell>
+      <div className="app-hero">
+        <span className="wolf-emoji" role="img" aria-label="Loup-garou">🐺</span>
+        <h1 className="tagline">Lance une nuit de loups-garous en quelques secondes</h1>
+        <p className="tagline-sub">Rejoins un village existant ou crée le tien en un clic.</p>
       </div>
+
+      <div className="screen-block">
+        <section className="screen-section">
+          <div className="screen-section__title">
+            <h2>Rejoindre un village</h2>
+            <p>Entre le code partagé par le maître du jeu.</p>
+          </div>
+          <form onSubmit={handleJoinSubmit} className="inline-actions" aria-label="Rejoindre une partie">
+            <div className="input-row">
+              <input
+                id="room-code"
+                type="text"
+                className="input-control"
+                placeholder="ex. ABCDE"
+                value={roomCode}
+                onChange={(event) => {
+                  if (error) setError('')
+                  setRoomCode(event.target.value.toUpperCase())
+                }}
+                autoComplete="off"
+                maxLength={8}
+              />
+              <button type="submit" className="btn">
+                {isSearchingRoom ? 'Recherche…' : 'Rejoindre'}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="screen-section">
+          <div className="screen-section__title">
+            <h2>Créer une partie</h2>
+            <p>Deviens maître du jeu et invite ton village.</p>
+          </div>
+          <div className="inline-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setError('')
+                setPendingRoom(null)
+                setStep('name')
+              }}
+            >
+              Lancer une nouvelle salle
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setError('')
+                setPendingRoom(null)
+                setStep('name')
+                setName('Test MJ')
+              }}
+            >
+              Essayer rapidement
+            </button>
+          </div>
+        </section>
+
+        {error && <p className="form-error" role="alert">{error}</p>}
+      </div>
+    </AppShell>
+  )
+
+  const renderNameStep = () => {
+    const isMasterPath = !pendingRoom
+
+    return (
+      <AppShell>
+        <div className="app-hero">
+          <span className="wolf-emoji" role="img" aria-label="Loup-garou">🐺</span>
+          <h1 className="tagline">Choisis ton identifiant</h1>
+          <p className="tagline-sub">{isMasterPath ? 'Visible par les joueurs.' : `Salle ${pendingRoom.code}`}</p>
+        </div>
+
+        <div className="screen-section">
+          <form onSubmit={handleNameSubmit} className="inline-actions inline-actions--compact">
+            <input
+              id="player-name"
+              type="text"
+              className="input-control"
+              placeholder="Pseudo nocturne"
+              value={name}
+              onChange={(event) => {
+                if (error) setError('')
+                setName(event.target.value)
+              }}
+              required
+              autoComplete="off"
+            />
+            <button type="submit" className="btn" disabled={isMasterPath ? isCreating : isJoining}>
+              {isMasterPath
+                ? isCreating ? 'Création…' : 'Créer la partie'
+                : isJoining ? 'Connexion…' : 'Entrer dans la salle'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setError('')
+                setPendingRoom(null)
+                setStep('code')
+              }}
+              disabled={isCreating || isJoining}
+            >
+              Retour
+            </button>
+          </form>
+
+          {isMasterPath && (
+            <div className="try-buttons">
+              {[8, 11, 13, 16].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setError('')
+                    handleCreateGame(count)
+                  }}
+                  disabled={isCreating}
+                >
+                  {isCreating ? 'Création…' : `${count} joueurs test`}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {error && <p className="form-error" role="alert">{error}</p>}
+        </div>
+      </AppShell>
     )
+  }
+
+  const renderWaitingStep = () => (
+    <AppShell>
+      <span className="wolf-emoji" role="img" aria-label="Loup-garou">🐺</span>
+      {player.isMaster
+        ? <WaitingRoomMJ roomId={player.room} code={player.code} />
+        : <WaitingRoomPlayer roomId={player.room} name={player.name} code={player.code} />}
+    </AppShell>
+  )
+
+  const renderInGameStep = () => (
+    <AppShell>
+      {player.isMaster
+        ? <GameMasterView roomId={player.room} code={player.code} masterName={player.name} />
+        : <PlayerRoleView player={player} />}
+    </AppShell>
+  )
+
+  if (step === 'code') {
+    return renderLandingStep()
+  }
+
+  if (step === 'name') {
+    return renderNameStep()
   }
 
   if (step === 'waiting') {
-    return (
-      <div>
-        {player.isMaster
-          ? <WaitingRoomMJ roomId={player.room} code={player.code} />
-          : <WaitingRoomPlayer roomId={player.room} name={player.name} code={player.code} />}
-      </div>
-    )
+    return renderWaitingStep()
   }
 
   if (step === 'inGame' && player) {
-    return player.isMaster
-      ? <GameMasterView roomId={player.room} code={player.code} />
-      : <PlayerRoleView player={player} />
+    return renderInGameStep()
   }
 
   return null

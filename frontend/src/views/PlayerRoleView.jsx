@@ -1,30 +1,32 @@
 import { ROLE_DEFINITIONS } from '../shared/lib/gameLogic'
 
-
 export default function PlayerRoleView({ player }) {
   if (!player) return null
 
   const roleInfo = player.role ? ROLE_DEFINITIONS[player.role] : null
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Ton rôle</h2>
-      <p>Bienvenue <strong>{player.name}</strong></p>
-      {player.role
-        ? (
-          <div>
-            <p>Tu es <strong>{player.role}</strong>.</p>
-            <p>Garde cette information secrète !</p>
-          </div>
-          )
-        : <p>En attente de ton rôle…</p>}
+    <div className="player-screen">
+      <div className="player-screen__header">
+        <span className="wolf-icon-small" role="img" aria-hidden="true">🐺</span>
+        <h2>{player.name}</h2>
+      </div>
+
+      <div className="player-section">
+        <span className="section-label">Ton rôle</span>
+        <div className="role-card role-card--player">
+          <span className="role-name">{player.role || 'Distribution en cours…'}</span>
+        </div>
+      </div>
 
       {roleInfo?.description && (
-        <div style={{ marginTop: 32 }}>
-          <h3>Description</h3>
-          <p>{roleInfo.description}</p>
+        <div className="player-section">
+          <span className="section-label">Description</span>
+          <p className="status-text player-screen__description">{roleInfo.description}</p>
         </div>
       )}
+
+      <p className="secret-warning">Garde ces informations secrètes ! 🤫</p>
     </div>
   )
 }

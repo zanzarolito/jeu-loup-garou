@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  pocketbase:
+    image: <ECR_REGISTRY>/<ECR_REPOSITORY>:latest
+    container_name: pocketbase
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./backend-pocketbase/pb_data:/pb_data
+      - ./backend-pocketbase/pb_migrations:/pb_migrations
+    restart: unless-stopped
+
+# Copy this file on le serveur (ex: /home/ubuntu/jeu-loup-garou) et remplace
+# <ECR_REGISTRY>/<ECR_REPOSITORY> par ta valeur ECR réelle, par exemple :
+# 123456789012.dkr.ecr.eu-west-3.amazonaws.com/pocketbase
+# Le frontend est servi via S3/CloudFront et n'a pas besoin d'être exécuté ici.
